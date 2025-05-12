@@ -10,11 +10,11 @@
 
 /**
 |--------------------------------------------------------------------------
- *  Search keyword "YourDriver" and replace it with a meaningful name
+ *  Search keyword "TwitchDriver" and replace it with a meaningful name
 |--------------------------------------------------------------------------
  */
 
-import { Oauth2Driver } from '@adonisjs/ally'
+import { Oauth2Driver, RedirectRequest } from '@adonisjs/ally'
 import type { HttpContext } from '@adonisjs/core/http'
 import type { AllyDriverContract, AllyUserContract, ApiRequestContract } from '@adonisjs/ally/types'
 
@@ -24,7 +24,7 @@ import type { AllyDriverContract, AllyUserContract, ApiRequestContract } from '@
  * token must have "token" and "type" properties and you may
  * define additional properties (if needed)
  */
-export type YourDriverAccessToken = {
+export type TwitchDriverAccessToken = {
   token: string
   type: 'bearer'
 }
@@ -32,12 +32,12 @@ export type YourDriverAccessToken = {
 /**
  * Scopes accepted by the driver implementation.
  */
-export type YourDriverScopes = string
+export type TwitchDriverScopes = 'user:read:email'
 
 /**
  * The configuration accepted by the driver implementation.
  */
-export type YourDriverConfig = {
+export type TwitchDriverConfig = {
   clientId: string
   clientSecret: string
   callbackUrl: string
@@ -50,9 +50,9 @@ export type YourDriverConfig = {
  * Driver implementation. It is mostly configuration driven except the API call
  * to get user info.
  */
-export class YourDriver
-  extends Oauth2Driver<YourDriverAccessToken, YourDriverScopes>
-  implements AllyDriverContract<YourDriverAccessToken, YourDriverScopes>
+export class TwitchDriver
+  extends Oauth2Driver<TwitchDriverAccessToken, TwitchDriverScopes>
+  implements AllyDriverContract<TwitchDriverAccessToken, TwitchDriverScopes>
 {
   /**
    * The URL for the redirect request. The user will be redirected on this page
@@ -60,21 +60,21 @@ export class YourDriver
    *
    * Do not define query strings in this URL.
    */
-  protected authorizeUrl = ''
+  protected authorizeUrl = 'https://id.twitch.tv/oauth2/authorize'
 
   /**
    * The URL to hit to exchange the authorization code for the access token
    *
    * Do not define query strings in this URL.
    */
-  protected accessTokenUrl = ''
+  protected accessTokenUrl = 'https://id.twitch.tv/oauth2/token'
 
   /**
    * The URL to hit to get the user details
    *
    * Do not define query strings in this URL.
    */
-  protected userInfoUrl = ''
+  protected userInfoUrl = 'https://api.twitch.tv/helix/users'
 
   /**
    * The param name for the authorization code. Read the documentation of your oauth
@@ -95,7 +95,7 @@ export class YourDriver
    * approach is to prefix the oauth provider name to `oauth_state` value. For example:
    * For example: "facebook_oauth_state"
    */
-  protected stateCookieName = 'YourDriver_oauth_state'
+  protected stateCookieName = 'twitch_oauth_state'
 
   /**
    * Parameter name to be used for sending and receiving the state from.
@@ -115,9 +115,18 @@ export class YourDriver
    */
   protected scopesSeparator = ' '
 
+  protected scopes: TwitchDriverScopes[] = ['user:read:email'] // Default scope
+
+  /**
+   * The separator indentifier for defining multiple scopes
+   */
+  setScopes(scopes: TwitchDriverScopes[]) {
+    this.scopes = scopes
+  }
+
   constructor(
     ctx: HttpContext,
-    public config: YourDriverConfig
+    public config: TwitchDriverConfig
   ) {
     super(ctx, config)
 
@@ -135,7 +144,10 @@ export class YourDriver
    * is made by the base implementation of "Oauth2" driver and this is a
    * hook to pre-configure the request.
    */
-  // protected configureRedirectRequest(request: RedirectRequest<YourDriverScopes>) {}
+  protected configureRedirectRequest(request: RedirectRequest<TwitchDriverScopes>) {
+    request.param('response_type', 'code')
+    request.param('scope', this.scopes.join(' '))
+  }
 
   /**
    * Optionally configure the access token request. The actual request is made by
@@ -161,10 +173,12 @@ export class YourDriver
    */
   async user(
     callback?: (request: ApiRequestContract) => void
-  ): Promise<AllyUserContract<YourDriverAccessToken>> {
+  ): Promise<AllyUserContract<TwitchDriverAccessToken>> {
     const accessToken = await this.accessToken()
     const request = this.httpClient(this.config.userInfoUrl || this.userInfoUrl)
 
+    request.header('Authorization', `Bearer ${accessToken.token}`)
+    request.header('Client-ID', this.config.clientId)
     /**
      * Allow end user to configure the request. This should be called after your custom
      * configuration, so that the user can override them (if needed)
@@ -176,6 +190,20 @@ export class YourDriver
     /**
      * Write your implementation details here.
      */
+    // Envoyer la requête pour récupérer les informations utilisateur
+    const userResponse = await request.get()
+    const [userData] = userResponse.data
+
+    return {
+      id: userData.id,
+      nickName: userData.login,
+      name: userData.display_name,
+      email: userData.email,
+      avatarUrl: userData.profile_image_url,
+      token: accessToken,
+      original: userData, // Toutes les données brutes reçues
+      emailVerificationState: 'unsupported',
+    }
   }
 
   async userFromToken(
@@ -184,6 +212,8 @@ export class YourDriver
   ): Promise<AllyUserContract<{ token: string; type: 'bearer' }>> {
     const request = this.httpClient(this.config.userInfoUrl || this.userInfoUrl)
 
+    request.header('Authorization', `Bearer ${accessToken}`)
+    request.header('Client-ID', this.config.clientId)
     /**
      * Allow end user to configure the request. This should be called after your custom
      * configuration, so that the user can override them (if needed)
@@ -195,6 +225,19 @@ export class YourDriver
     /**
      * Write your implementation details here
      */
+    const userResponse = await request.get()
+    const [userData] = userResponse.data
+
+    return {
+      id: userData.id,
+      nickName: userData.login,
+      name: userData.display_name,
+      email: userData.email,
+      avatarUrl: userData.profile_image_url,
+      token: { token: accessToken, type: 'bearer' },
+      original: userData, // Toutes les données brutes reçues
+      emailVerificationState: 'unsupported',
+    }
   }
 }
 
@@ -202,6 +245,8 @@ export class YourDriver
  * The factory function to reference the driver implementation
  * inside the "config/ally.ts" file.
  */
-export function YourDriverService(config: YourDriverConfig): (ctx: HttpContext) => YourDriver {
-  return (ctx) => new YourDriver(ctx, config)
+export function TwitchDriverService(
+  config: TwitchDriverConfig
+): (ctx: HttpContext) => TwitchDriver {
+  return (ctx) => new TwitchDriver(ctx, config)
 }

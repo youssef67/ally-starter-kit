@@ -1,6 +1,11 @@
 {
   "extends": "@adonisjs/tsconfig/tsconfig.package.json",
   "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@adonisjs/http-server": ["../lousa-api/node_modules/@adonisjs/http-server"],
+      "@adonisjs/core": ["../lousa-api/node_modules/@adonisjs/core"]
+    },
     "rootDir": "./",
     "outDir": "./build"
   }
